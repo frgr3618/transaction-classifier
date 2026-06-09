@@ -225,4 +225,5 @@ __marimo__/
 .venv/
 __pycache__/
 .ipynb_checkpoints/
-.env
+.envsrc/key.json
+./src/key.json
