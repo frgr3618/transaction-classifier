@@ -227,3 +227,4 @@ __pycache__/
 .ipynb_checkpoints/
 .envsrc/key.json
 ./src/key.json
+key.json
