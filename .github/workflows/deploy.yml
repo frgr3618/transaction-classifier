@@ -21,12 +21,13 @@ jobs:
        - name: Set up Cloud SDK
          uses: google-github-actions/setup-gcloud@v3
 
+       - name: Configure Docker for GCR
+         run: gcloud auth configure-docker gcr.io
+
        - name: Build and push Image
          run: |
-          gcloud builds submit \
-            --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/transaction-classifier \
-            --project ${{ secrets.GCP_PROJECT_ID }} \
-            ./src
+          docker build -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/transaction-classifier ./src
+          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/transaction-classifier
 
        - name: Deploy to Cloud Run
          run: |
