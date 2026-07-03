@@ -23,7 +23,10 @@ jobs:
 
        - name: Build and push Image
          run: |
-          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/transaction-classifier --stream-logs=false ./src
+          gcloud builds submit \
+            --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/transaction-classifier \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
+            ./src
 
        - name: Deploy to Cloud Run
          run: |
@@ -31,4 +34,5 @@ jobs:
             --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/transaction-classifier \
             --platform managed \
             --region europe-north1 \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
             --allow-unauthenticated
