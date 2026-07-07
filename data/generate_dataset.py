@@ -174,8 +174,45 @@ ABBREVIATIONS = {
     "government": "govt", "international": "intl", "professional": "prof",
 }
 
-TYPO_RATE = 0.20
-TRUNCATE_RATE = 0.12
+# Generic, brand-free phrases that carry almost no category signal on their
+# own -- real bank statements are full of these ("POS purchase", "UPI payment
+# to vendor"). Each maps to several *plausible* categories; the same phrase
+# gets used verbatim across all of them, so a meaningful chunk of the dataset
+# is genuinely ambiguous from text alone, not just noisy. This is what
+# actually drives difficulty -- character-level noise on an intact brand
+# keyword barely moves a bag-of-words model, since the one maximally
+# discriminative token usually survives untouched.
+GENERIC_PHRASES = [
+    ("Online payment", ["shopping", "entertainment", "utilities", "education"]),
+    ("POS purchase", ["shopping", "food", "travel"]),
+    ("Merchant payment", ["shopping", "food", "entertainment", "utilities"]),
+    ("Card transaction", ["shopping", "food", "travel", "entertainment"]),
+    ("UPI payment to vendor", ["shopping", "food", "utilities", "healthcare"]),
+    ("Debit card purchase", ["shopping", "food", "travel"]),
+    ("Online transaction", ["shopping", "entertainment", "investment", "education"]),
+    ("Store purchase", ["shopping", "food"]),
+    ("Vendor payment", ["shopping", "food", "healthcare", "utilities"]),
+    ("Monthly subscription payment", ["entertainment", "education", "utilities", "investment"]),
+    ("Service payment", ["healthcare", "utilities", "travel", "entertainment"]),
+    ("Retail purchase", ["shopping", "food"]),
+    ("Digital payment", ["shopping", "entertainment", "utilities", "investment"]),
+    ("App purchase", ["entertainment", "shopping", "education"]),
+    ("Website payment", ["shopping", "entertainment", "education", "travel"]),
+    ("Recurring payment", ["emi", "investment", "utilities", "entertainment"]),
+    ("Auto debit payment", ["emi", "utilities", "investment"]),
+    ("Wallet payment", ["shopping", "food", "travel", "entertainment"]),
+    ("NEFT payment", ["emi", "investment", "education", "healthcare"]),
+    ("Payment to merchant", ["shopping", "food", "healthcare", "travel"]),
+    ("Purchase transaction", ["shopping", "food", "travel"]),
+    ("Bill payment", ["utilities", "healthcare", "education", "emi"]),
+    ("Subscription payment", ["entertainment", "education", "utilities"]),
+    ("Standing instruction payment", ["emi", "investment", "utilities"]),
+    ("Direct debit payment", ["emi", "utilities", "investment", "healthcare"]),
+]
+
+GENERIC_RATE = 0.25
+TYPO_RATE = 0.35
+TRUNCATE_RATE = 0.18
 SEPARATOR_RATE = 0.15
 ABBREV_WORD_RATE = 0.35
 
@@ -245,8 +282,16 @@ def sample_amount(category, rng, np_rng):
     return int(round(amount))
 
 
+def _pick_phrase(category, rng):
+    if rng.random() < GENERIC_RATE:
+        candidates = [p for p, cats in GENERIC_PHRASES if category in cats]
+        if candidates:
+            return rng.choice(candidates)
+    return rng.choice(VOCAB[category])
+
+
 def generate_row(category, rng, np_rng):
-    phrase = rng.choice(VOCAB[category])
+    phrase = _pick_phrase(category, rng)
     phrase = apply_abbreviation(phrase, rng)
     phrase = apply_typo(phrase, rng)
     phrase = apply_truncation(phrase, rng)
