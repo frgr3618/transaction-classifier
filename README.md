@@ -1,125 +1,127 @@
 # Transaction Classifier
 
-A simple end-to-end machine learning service for classifying financial transaction descriptions into categories.
+An end-to-end ML system that classifies bank transaction descriptions (e.g. `"NETMEDS PHARMACY/ORDER INR 890 TXNe721d278"`) into 9 spending categories, served as a REST API in production.
 
-This repository includes a trained scikit-learn model, TF-IDF preprocessing, a FastAPI inference service, and Docker support for containerized deployment.
-
-## Repository Structure
-
-- `src/`
-  - `app.py` — FastAPI application for serving prediction requests
-  - `requirements.txt` — Python dependencies
-  - `Dockerfile` — Container image build instructions
-  - `model.joblib` — Trained classification model
-  - `tfidf.joblib` — Saved TF-IDF vectorizer
-
-## Features
-
-- Clean transaction text before prediction
-- Vectorize text using TF-IDF
-- Predict transaction category using a serialized scikit-learn model
-- Expose a REST API endpoint for inference
-- Buildable as a Docker image for easy deployment
-
-## API Usage
-
-The service exposes a single endpoint:
-
-- `POST /predict`
-
-Request body should include a plain string value for `transaction_text`.
-
-Example with `curl`:
+**Live demo:** [Swagger UI](https://transaction-classifier-ezybyezcpq-lz.a.run.app/docs) · `POST` [`/predict`](https://transaction-classifier-ezybyezcpq-lz.a.run.app/predict)
 
 ```bash
-curl -X POST "http://localhost:8080/predict" \
+curl -X POST "https://transaction-classifier-ezybyezcpq-lz.a.run.app/predict" \
   -H "Content-Type: application/json" \
-  -d '{"transaction_text": "Payment to ACME INC INR 1000"}'
+  -d '{"text": "Uber ride INR 240 TXN55667788"}'
+# {"category": "travel"}
 ```
 
-Example response:
+## What this project demonstrates
+
+- **Text classification pipeline**: regex cleaning → TF-IDF (word 1-2 grams) → Logistic Regression, with Random Forest as a compared alternative
+- **Experiment tracking**: every training run logged to [MLflow on DagsHub](https://dagshub.com/frgr3618/transaction-classifier) (params, metrics, per-class F1), best model registered in the model registry
+- **Data versioning**: datasets tracked with DVC, remote storage on DagsHub — every model version is reproducible against the exact data it was trained on
+- **CI/CD**: push to `main` triggers GitHub Actions → Docker build → deploy to Google Cloud Run
+- **Honest evaluation**: a deliberately hard dataset, a documented val/test robustness check, and a known-limitations section below
+
+## The dataset story (or: why 79% beats 100%)
+
+The first version of this project scored **100% accuracy**. That number was a red flag, not an achievement: the synthetic dataset collapsed to just 45 unique phrases after cleaning, so train, validation, and test all drew from the same closed set — the model was a lookup table.
+
+The dataset was rebuilt from scratch ([`data/generate_dataset.py`](data/generate_dataset.py)) to be realistically hard:
+
+- **~280 merchant phrases** across 9 categories (brands like Swiggy, Zerodha, IRCTC plus generic descriptors), instead of 45 templates
+- **Real-world text noise** applied inside the merchant text: typos (`Braodband`), abbreviations (`Catering svc pymt`), POS-terminal truncation, casing and separator variance
+- **Genuine ambiguity**: ~25% of rows use brand-free phrases like `"POS purchase"` or `"UPI payment to vendor"` that legitimately map to several categories — the same irreducible uncertainty a real bank-statement classifier faces. Some brands are also cross-category by design (`"Amazon payment"` appears as both `shopping` and `entertainment`)
+- **Amount realism**: per-category lognormal amount distributions, with shapes informed by a real 1.3M-row credit card transaction dataset
+
+Results on the rebuilt dataset:
+
+| Model | Validation accuracy | Test accuracy |
+|---|---|---|
+| Logistic Regression | **0.762** | **0.789** |
+| Random Forest | 0.749 | — |
+
+Logistic Regression won the comparison — a real, explainable outcome (linear models generalize better on high-dimensional sparse TF-IDF features, while Random Forest overfits noisy text). Test slightly exceeding validation is sampling noise on 1,000-row evaluation sets; the training notebook includes a **robustness check** that refits across 5 different train/val splits to demonstrate the scores are stable (val spread ~±1.5 points, test stable).
+
+The full progression — 100% (templated) → 79% (realistic) — is visible in the [DagsHub experiment history](https://dagshub.com/frgr3618/transaction-classifier).
+
+## Repository structure
+
+```
+├── src/
+│   ├── app.py                  # FastAPI serving layer
+│   ├── model.joblib            # Trained classifier (current: Logistic Regression)
+│   ├── tfidf.joblib            # Fitted TF-IDF vectorizer
+│   ├── requirements.txt
+│   └── Dockerfile
+├── data/
+│   ├── generate_dataset.py     # Seeded synthetic dataset generator
+│   └── raw/*.csv               # Train/test data (DVC-tracked, pointers in git)
+├── notebooks/
+│   ├── 01_eda.ipynb
+│   └── 02_model_training.ipynb # Training + MLflow logging + robustness check
+└── .github/workflows/
+    └── deploy.yml              # CI/CD: build image, push to GCR, deploy to Cloud Run
+```
+
+## API usage
+
+`POST /predict` with a JSON body containing `text`:
+
+```bash
+curl -X POST "https://transaction-classifier-ezybyezcpq-lz.a.run.app/predict" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Zomato order INR 450 TXNab12cd34"}'
+```
+
+Response:
 
 ```json
-{
-  "transaction": "Payment to ACME INC INR 1000",
-  "category": "<predicted_category>"
-}
+{"category": "food"}
 ```
 
-## Local Setup
+Categories: `education`, `emi`, `entertainment`, `food`, `healthcare`, `investment`, `shopping`, `travel`, `utilities`.
 
-1. Create and activate a virtual environment:
+Amounts (`INR ...`) and transaction IDs (`TXN...`) are stripped by preprocessing, so bare merchant text works too — `{"text": "Netflix"}` → `entertainment`.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-2. Install dependencies:
+## Reproducing the pipeline
 
 ```bash
+# environment
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r src/requirements.txt
+
+# regenerate the dataset (seeded, reproducible)
+python data/generate_dataset.py
+
+# version the data
+dvc add data/raw/train_transactions.csv data/raw/test_transactions.csv
+dvc push
+
+# retrain: run notebooks/02_model_training.ipynb top to bottom
+# (logs runs to MLflow, registers the best model, saves joblib artifacts to src/)
 ```
 
-3. Run the FastAPI app from the `src` directory:
+MLflow tracking requires a `.env` file with `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD` (DagsHub token).
+
+## Running the API locally
 
 ```bash
 cd src
 uvicorn app:app --host 0.0.0.0 --port 8080
 ```
 
-## Docker
-
-Build the Docker image from the `src` directory:
+Or with Docker:
 
 ```bash
 cd src
 docker build -t transaction-classifier .
-```
-
-Run the container:
-
-```bash
 docker run -p 8080:8080 transaction-classifier
 ```
 
 ## Deployment
 
-This project is ready for deployment to container platforms such as Google Cloud Run, AWS ECS, or Azure Container Instances.
+Handled by CI/CD: every push to `main` builds the Docker image on the GitHub Actions runner, pushes it to Google Container Registry, and deploys to Cloud Run (`europe-north1`). The model and vectorizer are baked into the image at build time.
 
-Example GCP Cloud Run deploy command:
+## Known limitations & future work
 
-```bash
-gcloud run deploy transaction-classifier \
-  --image gcr.io/<PROJECT_ID>/transaction-classifier \
-  --platform managed \
-  --region <REGION> \
-  --allow-unauthenticated
-```
-
-## Live Deployment
-
-The model is currently deployed and accessible at:
-
-```text
-https://transaction-classifier-ezybyezcpq-lz.a.run.app
-```
-
-Use the full prediction endpoint for requests:
-
-```text
-https://transaction-classifier-ezybyezcpq-lz.a.run.app/predict
-```
-
-FastAPI Swagger docs are available at:
-
-```text
-https://transaction-classifier-ezybyezcpq-lz.a.run.app/docs
-```
-
-## Notes
-
-- The service uses simple regex-based cleaning for transaction text.
-- The model and vectorizer are loaded from `model.joblib` and `tfidf.joblib` at startup.
-- Customize preprocessing or retrain the model by replacing these serialized artifacts.
-
+- **Vocabulary-bound**: TF-IDF has no world knowledge. `"Google"` classifies as `entertainment` because the training data only contains Google Play — a `"Google Cloud"` charge would be misclassified. Fix: broader training phrases, or embedding/LLM-based features.
+- **No confidence in the API response**: the model's `predict_proba` is informative (it drops to ~0.3 on ambiguous inputs) but isn't exposed. Adding it would let callers route low-confidence transactions to human review.
+- **Model loading**: the API loads baked-in joblib artifacts; a planned upgrade is pulling the current Production model from the MLflow registry at startup.
+- **Synthetic data**: the dataset is generated, not real (real labeled bank data is scarce for privacy reasons). The generator is designed to reproduce the *failure modes* of real data — ambiguity, noise, format variance — rather than its exact distribution.
