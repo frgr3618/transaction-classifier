@@ -149,10 +149,14 @@ VOCAB = {
 }
 
 # (min, median, max, sigma) for a lognormal amount sampler, in INR. Shape
-# (skew/relative spread) is informed by real per-category amount stats pulled
-# from a real-world credit card transaction dataset -- categories with wide
-# real-world variance (travel, shopping, healthcare, investment) get a wider
-# sigma / max than tight ones (food, entertainment, utilities, emi).
+# (skew/relative spread) is informed by per-category amount stats pulled from
+# the Kaggle "Credit Card Transactions Dataset" by Priyam Choksi
+# (https://www.kaggle.com/datasets/priyamchoksi/credit-card-transactions-dataset,
+# 1.3M Sparkov-simulated rows) -- categories with wide variance there
+# (travel, shopping, healthcare, investment) get a wider sigma / max than
+# tight ones (food, entertainment, utilities, emi). Merchant phrase style is
+# partly inspired by the Kaggle "Indian Banking Transaction Text Dataset" by
+# coderanand (Apache 2.0). No rows were copied from either dataset.
 AMOUNT_PARAMS = {
     "education": (500, 8000, 80000, 0.9),
     "emi": (2000, 12000, 45000, 0.5),
